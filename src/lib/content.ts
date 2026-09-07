@@ -3,7 +3,18 @@ import wakkerData from '../../data/wakker-content.json';
 import { WakkerContent, DailyContent, Phase } from '../types';
 import { PhaseId } from './theme';
 
-const content = wakkerData as unknown as WakkerContent;
+const rawData = wakkerData as any;
+
+// Normaliseer phases.days van array [start, end] naar object { start, end }
+const content: WakkerContent = {
+  ...rawData,
+  phases: rawData.phases.map((p: any) => ({
+    ...p,
+    days: Array.isArray(p.days)
+      ? { start: p.days[0], end: p.days[1] }
+      : p.days,
+  })),
+};
 
 // === Dagelijkse content ===
 

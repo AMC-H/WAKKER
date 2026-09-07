@@ -25,7 +25,7 @@ export default function RegisterScreen() {
     }
 
     setLoading(true);
-    const { error } = await signUp(email.trim(), password);
+    const { error } = await signUp(email.trim(), password, name.trim());
     setLoading(false);
 
     if (error) {

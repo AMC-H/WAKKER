@@ -69,7 +69,7 @@ export default function WelcomeScreen() {
         <View style={styles.actions}>
           <AnimatedPressable
             style={[styles.primaryButton, primaryStyle]}
-            onPress={() => router.push('/onboarding/name')}
+            onPress={() => router.push('/(auth)/register')}
             onPressIn={() => { primaryScale.value = withSpring(0.96, { damping: 15, stiffness: 400 }); }}
             onPressOut={() => { primaryScale.value = withSpring(1, { damping: 15, stiffness: 400 }); }}
           >

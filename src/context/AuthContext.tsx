@@ -28,7 +28,7 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   isDemo: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
 }
@@ -80,13 +80,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, []);
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, displayName?: string) => {
     if (IS_DEMO) {
       setSession(DEMO_SESSION);
       return { error: null };
     }
     const { supabase } = require('../lib/supabase');
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { display_name: displayName || '' },
+      },
+    });
     return { error };
   };
 

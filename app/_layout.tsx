@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, Redirect, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
@@ -8,22 +7,7 @@ import { COLORS } from '../src/lib/theme';
 
 function RootNavigator() {
   const { session, loading } = useAuth();
-  const router = useRouter();
   const segments = useSegments();
-
-  useEffect(() => {
-    if (loading) return;
-
-    const inAuthGroup = segments[0] === '(auth)';
-
-    if (!session && !inAuthGroup) {
-      // Niet ingelogd → ga naar welkom
-      router.replace('/(auth)/welcome');
-    } else if (session && inAuthGroup) {
-      // Wel ingelogd → ga naar app
-      router.replace('/(tabs)');
-    }
-  }, [session, loading, segments]);
 
   if (loading) {
     return (
@@ -31,6 +15,18 @@ function RootNavigator() {
         <ActivityIndicator size="large" color={COLORS.primary} />
       </View>
     );
+  }
+
+  const inAuthGroup = segments[0] === '(auth)';
+
+  // Niet ingelogd en niet op auth pagina → redirect naar welkom
+  if (!session && !inAuthGroup) {
+    return <Redirect href="/(auth)/welcome" />;
+  }
+
+  // Ingelogd en nog op auth pagina → redirect naar app
+  if (session && inAuthGroup) {
+    return <Redirect href="/(tabs)" />;
   }
 
   return (

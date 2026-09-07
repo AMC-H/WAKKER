@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, Pressable,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
@@ -12,21 +12,28 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
 
   const handleLogin = async () => {
+    setMessage(null);
+
     if (!email || !password) {
-      Alert.alert('Vul alle velden in');
+      setMessage({ text: 'Vul alle velden in', type: 'error' });
       return;
     }
 
     setLoading(true);
-    const { error } = await signIn(email.trim(), password);
-    setLoading(false);
+    try {
+      const { error } = await signIn(email.trim(), password);
 
-    if (error) {
-      Alert.alert('Inloggen mislukt', error.message);
-    } else {
-      router.replace('/(tabs)');
+      if (error) {
+        setMessage({ text: error.message || 'Inloggen mislukt', type: 'error' });
+      }
+      // Success: session change triggers auto-redirect via _layout.tsx
+    } catch (err: any) {
+      setMessage({ text: err?.message || 'Er ging iets mis', type: 'error' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -42,6 +49,20 @@ export default function LoginScreen() {
       <View style={styles.form}>
         <Text style={styles.title}>Welkom terug</Text>
         <Text style={styles.subtitle}>Log in om verder te gaan met je reis</Text>
+
+        {message && (
+          <View style={[
+            styles.messageBox,
+            message.type === 'error' ? styles.errorBox : styles.successBox,
+          ]}>
+            <Text style={[
+              styles.messageText,
+              message.type === 'error' ? styles.errorText : styles.successText,
+            ]}>
+              {message.text}
+            </Text>
+          </View>
+        )}
 
         <TextInput
           style={styles.input}
@@ -73,6 +94,10 @@ export default function LoginScreen() {
           ) : (
             <Text style={styles.buttonText}>Inloggen</Text>
           )}
+        </Pressable>
+
+        <Pressable onPress={() => router.push('/(auth)/register')}>
+          <Text style={styles.registerLink}>Nog geen account? Registreer</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -107,7 +132,33 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONT_SIZES.body,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.lg,
+  },
+  messageBox: {
+    padding: SPACING.sm,
+    borderRadius: RADIUS.sm,
+    marginBottom: SPACING.md,
+  },
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  successBox: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  messageText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#DC2626',
+  },
+  successText: {
+    color: '#059669',
   },
   input: {
     backgroundColor: COLORS.surface,
@@ -134,5 +185,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
+  },
+  registerLink: {
+    textAlign: 'center',
+    color: COLORS.primary,
+    fontSize: FONT_SIZES.body,
+    marginTop: SPACING.md,
+    fontWeight: '500',
   },
 });

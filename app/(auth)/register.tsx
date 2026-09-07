@@ -1,41 +1,71 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, Pressable,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { COLORS, SPACING, FONT_SIZES, RADIUS } from '../../src/lib/theme';
 
 export default function RegisterScreen() {
-  const { signUp } = useAuth();
+  const { signUp, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
 
   const handleRegister = async () => {
+    setMessage(null);
+
     if (!email || !password || !name) {
-      Alert.alert('Vul alle velden in');
+      setMessage({ text: 'Vul alle velden in', type: 'error' });
       return;
     }
     if (password.length < 6) {
-      Alert.alert('Wachtwoord moet minimaal 6 tekens zijn');
+      setMessage({ text: 'Wachtwoord moet minimaal 6 tekens zijn', type: 'error' });
       return;
     }
 
     setLoading(true);
-    const { error } = await signUp(email.trim(), password, name.trim());
-    setLoading(false);
+    try {
+      const { error } = await signUp(email.trim(), password, name.trim());
 
-    if (error) {
-      Alert.alert('Registratie mislukt', error.message);
-    } else {
-      Alert.alert(
-        'Account aangemaakt!',
-        'Check je e-mail om je account te bevestigen.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
-      );
+      if (error) {
+        // Als account al bestaat of rate limit: probeer direct in te loggen
+        if (
+          error.message?.includes('already registered') ||
+          error.message?.includes('rate limit') ||
+          error.message?.includes('already been registered') ||
+          error.message?.includes('User already registered')
+        ) {
+          setMessage({ text: 'Account gevonden, je wordt ingelogd...', type: 'success' });
+          const { error: loginError } = await signIn(email.trim(), password);
+          if (loginError) {
+            setMessage({ text: loginError.message || 'Inloggen mislukt — check je wachtwoord', type: 'error' });
+          }
+          // Succes: session change triggert redirect
+          setLoading(false);
+          return;
+        }
+        setMessage({ text: error.message || 'Registratie mislukt', type: 'error' });
+        setLoading(false);
+        return;
+      }
+
+      // Nieuw account aangemaakt — direct inloggen
+      setMessage({ text: 'Account aangemaakt! Even inloggen...', type: 'success' });
+      await new Promise((r) => setTimeout(r, 500));
+
+      const { error: signInError } = await signIn(email.trim(), password);
+      if (signInError) {
+        setMessage({ text: 'Account aangemaakt! Log in met je gegevens.', type: 'success' });
+        setTimeout(() => router.replace('/(auth)/login'), 1500);
+      }
+    } catch (err: any) {
+      setMessage({ text: err?.message || 'Er ging iets mis', type: 'error' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -51,8 +81,22 @@ export default function RegisterScreen() {
       <View style={styles.form}>
         <Text style={styles.title}>Begin je reis</Text>
         <Text style={styles.subtitle}>
-          Maak een gratis account aan — Fase 1 (14 dagen) is helemaal gratis
+          Maak een account aan of log in — Fase 1 (14 dagen) is helemaal gratis
         </Text>
+
+        {message && (
+          <View style={[
+            styles.messageBox,
+            message.type === 'error' ? styles.errorBox : styles.successBox,
+          ]}>
+            <Text style={[
+              styles.messageText,
+              message.type === 'error' ? styles.errorText : styles.successText,
+            ]}>
+              {message.text}
+            </Text>
+          </View>
+        )}
 
         <TextInput
           style={styles.input}
@@ -91,7 +135,7 @@ export default function RegisterScreen() {
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Account aanmaken</Text>
+            <Text style={styles.buttonText}>Doorgaan</Text>
           )}
         </Pressable>
 
@@ -131,8 +175,34 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONT_SIZES.body,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.lg,
     lineHeight: 22,
+  },
+  messageBox: {
+    padding: SPACING.sm,
+    borderRadius: RADIUS.sm,
+    marginBottom: SPACING.md,
+  },
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  successBox: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  messageText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#DC2626',
+  },
+  successText: {
+    color: '#059669',
   },
   input: {
     backgroundColor: COLORS.surface,

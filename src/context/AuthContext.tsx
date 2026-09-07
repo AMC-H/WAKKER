@@ -86,13 +86,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { error: null };
     }
     const { supabase } = require('../lib/supabase');
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { display_name: displayName || '' },
       },
     });
+    // With auto-confirm trigger, signup returns a session immediately
+    if (data?.session) {
+      setSession(data.session);
+    }
     return { error };
   };
 
@@ -102,7 +106,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { error: null };
     }
     const { supabase } = require('../lib/supabase');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (data?.session) {
+      setSession(data.session);
+    }
     return { error };
   };
 
@@ -113,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     const { supabase } = require('../lib/supabase');
     await supabase.auth.signOut();
+    setSession(null);
   };
 
   return (

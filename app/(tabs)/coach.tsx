@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useUser } from '../../src/context/UserContext';
+import { useAuth } from '../../src/context/AuthContext';
+import { getPhaseForDay } from '../../src/lib/content';
+import { sendToLina, loadTodayConversation } from '../../src/lib/coach';
 import { COLORS, SPACING, FONT_SIZES, RADIUS } from '../../src/lib/theme';
 
 interface Message {
@@ -23,12 +27,31 @@ const WELCOME_MESSAGE: Message = {
 
 export default function CoachScreen() {
   const insets = useSafeAreaInsets();
+  const { profile, currentDay, progress } = useUser();
+  const { isDemo } = useAuth();
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
+
+  // Laad eerdere gesprekken van vandaag
+  useEffect(() => {
+    if (isDemo) return;
+    loadTodayConversation().then((saved) => {
+      if (saved.length > 0) {
+        const restored: Message[] = saved.map((m, i) => ({
+          id: `saved-${i}`,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(),
+        }));
+        setMessages([WELCOME_MESSAGE, ...restored]);
+      }
+    }).catch(() => {});
+  }, [isDemo]);
 
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isTyping) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -37,22 +60,70 @@ export default function CoachScreen() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setInput('');
     setIsTyping(true);
 
-    // TODO: Hier komt de Claude API integratie (Fase 5)
-    // Voor nu een placeholder response
-    setTimeout(() => {
+    // Scroll naar beneden
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+    try {
+      // Bouw de berichten array (zonder welcome message en metadata)
+      const chatHistory = updatedMessages
+        .filter((m) => m.id !== 'welcome')
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      // Gebruikerscontext meesturen
+      const phase = getPhaseForDay(currentDay);
+      const streak = progress.filter((p) => p.completed).length;
+
+      const userContext = {
+        name: profile?.display_name || undefined,
+        currentDay,
+        phase: phase?.title || undefined,
+        streak,
+        motivation: profile?.motivation || undefined,
+      };
+
+      if (isDemo) {
+        // Demo modus: simuleer antwoord
+        setTimeout(() => {
+          const demoResponse: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: getDemoResponse(input.trim()),
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, demoResponse]);
+          setIsTyping(false);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        }, 1200);
+        return;
+      }
+
+      // Echte AI call
+      const { reply } = await sendToLina(chatHistory, userContext);
+
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Bedankt voor je bericht! De AI-coach wordt in een volgende fase gekoppeld. Binnenkort kan ik je echt helpen met persoonlijk advies.',
+        content: reply,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, aiResponse]);
+    } catch (err: any) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: err?.message || 'Sorry, er ging iets mis. Probeer het opnieuw.',
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1000);
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }
   };
 
   const renderMessage = ({ item }: { item: Message }) => (
@@ -93,13 +164,87 @@ export default function CoachScreen() {
         </View>
       </View>
 
+      {/* Snelle vragen */}
+      {messages.length <= 1 && (
+        <View style={styles.suggestionsContainer}>
+          {[
+            { text: 'Ik heb trek om te blowen', emoji: '🔥' },
+            { text: 'Ik voel me down vandaag', emoji: '💙' },
+            { text: 'Hoe blijf ik gemotiveerd?', emoji: '💪' },
+            { text: 'Ik heb teruggevallen', emoji: '🤝' },
+          ].map((suggestion) => (
+            <Pressable
+              key={suggestion.text}
+              style={styles.suggestionChip}
+              onPress={() => {
+                setInput(suggestion.text);
+                // Direct versturen
+                const msg: Message = {
+                  id: Date.now().toString(),
+                  role: 'user',
+                  content: suggestion.text,
+                  timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, msg]);
+                setInput('');
+                setIsTyping(true);
+
+                const chatHistory = [{ role: 'user' as const, content: suggestion.text }];
+                const phase = getPhaseForDay(currentDay);
+                const streak = progress.filter((p) => p.completed).length;
+                const userContext = {
+                  name: profile?.display_name || undefined,
+                  currentDay,
+                  phase: phase?.title || undefined,
+                  streak,
+                  motivation: profile?.motivation || undefined,
+                };
+
+                if (isDemo) {
+                  setTimeout(() => {
+                    setMessages((prev) => [...prev, {
+                      id: (Date.now() + 1).toString(),
+                      role: 'assistant',
+                      content: getDemoResponse(suggestion.text),
+                      timestamp: new Date(),
+                    }]);
+                    setIsTyping(false);
+                  }, 1200);
+                } else {
+                  sendToLina(chatHistory, userContext).then(({ reply }) => {
+                    setMessages((prev) => [...prev, {
+                      id: (Date.now() + 1).toString(),
+                      role: 'assistant',
+                      content: reply,
+                      timestamp: new Date(),
+                    }]);
+                  }).catch((err) => {
+                    setMessages((prev) => [...prev, {
+                      id: (Date.now() + 1).toString(),
+                      role: 'assistant',
+                      content: err?.message || 'Sorry, probeer het opnieuw.',
+                      timestamp: new Date(),
+                    }]);
+                  }).finally(() => setIsTyping(false));
+                }
+              }}
+            >
+              <Text style={styles.suggestionEmoji}>{suggestion.emoji}</Text>
+              <Text style={styles.suggestionText}>{suggestion.text}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
       {/* Messages */}
       <FlatList
+        ref={flatListRef}
         data={messages}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.messagesList}
         showsVerticalScrollIndicator={false}
+        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
       />
 
       {/* Typing indicator */}
@@ -119,17 +264,36 @@ export default function CoachScreen() {
           placeholderTextColor={COLORS.textMuted}
           multiline
           maxLength={1000}
+          onSubmitEditing={sendMessage}
         />
         <Pressable
-          style={[styles.sendButton, !input.trim() && styles.sendButtonDisabled]}
+          style={[styles.sendButton, (!input.trim() || isTyping) && styles.sendButtonDisabled]}
           onPress={sendMessage}
-          disabled={!input.trim()}
+          disabled={!input.trim() || isTyping}
         >
           <Ionicons name="send" size={18} color="#fff" />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
+}
+
+// Demo responses voor als er geen API key is
+function getDemoResponse(userInput: string): string {
+  const lower = userInput.toLowerCase();
+  if (lower.includes('trek') || lower.includes('craving') || lower.includes('blowen')) {
+    return 'Ik snap dat gevoel zo goed. Laten we de STOP-techniek gebruiken:\n\n🛑 Stop — pauzeer even\n🌬️ Trek adem — 4 tellen in, 7 vasthouden, 8 uit\n👁️ Observeer — wat voel je? Waar in je lichaam?\n💪 Pak de regie — wat zou je next level versie nu doen?\n\nDie craving duurt gemiddeld 15-20 minuten. Je bent sterker dan die stem.';
+  }
+  if (lower.includes('down') || lower.includes('verdrietig') || lower.includes('moeilijk')) {
+    return 'Het is oké om je zo te voelen. Stoppen is niet makkelijk en je hersenen zijn nog aan het herstellen. Dat kost tijd.\n\nWeet je wat me altijd hielp? Drie dingen benoemen waar ik dankbaar voor ben. Zelfs kleine dingen tellen.\n\nWaar ben jij vandaag dankbaar voor? 💛';
+  }
+  if (lower.includes('motivat') || lower.includes('waarom') || lower.includes('zin')) {
+    return 'Goede vraag! Herinner je waarom je bent begonnen. Je next level versie — wie is dat? Wat doet die persoon?\n\nElke dag dat je niet rookt, worden je neurale paden sterker. Je hersenen bouwen letterlijk nieuwe routes. Dat is geen motivatie — dat is wetenschap. 🧠\n\nWat was jouw belangrijkste reden om te stoppen?';
+  }
+  if (lower.includes('terugval') || lower.includes('gerookt') || lower.includes('gefaald')) {
+    return 'Hé, luister. Een terugval is géén falen. Het is een les. De meeste mensen die succesvol stoppen, hebben meerdere pogingen nodig.\n\nDe vraag is niet of je valt, maar of je opstaat. En het feit dat je hier bent, laat zien dat je dat doet. 🤝\n\nWat was de trigger? Als we die begrijpen, kunnen we er volgende keer beter mee omgaan.';
+  }
+  return 'Goed dat je erover praat! Dat is al een enorm sterke stap. Vertel me er meer over — wat gaat er door je heen?';
 }
 
 const styles = StyleSheet.create({
@@ -166,6 +330,31 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: FONT_SIZES.xs,
     color: COLORS.textSecondary,
+  },
+  suggestionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: SPACING.md,
+    gap: SPACING.sm,
+  },
+  suggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.xl,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.xs,
+  },
+  suggestionEmoji: {
+    fontSize: 16,
+  },
+  suggestionText: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.text,
+    fontWeight: '500',
   },
   messagesList: {
     padding: SPACING.md,
